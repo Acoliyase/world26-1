@@ -49,6 +49,7 @@ function App() {
   const [isAuto, setIsAuto] = useState(true);
   const [currentTask, setCurrentTask] = useState<string>("Analyzing Local Sector...");
   const [taskProgress, setTaskProgress] = useState(0);
+  const [userApiKey, setUserApiKey] = useState<string>(() => localStorage.getItem('mistral_api_key') || '');
   const logContainerRef = useRef<HTMLDivElement>(null);
 
   const addLog = useCallback((message: string, type: LogEntry['type'] = 'action') => {
@@ -106,8 +107,8 @@ function App() {
       return () => window.cancelIdleCallback(idleId);
     }
 
-    const timeoutId = window.setTimeout(warmUp, 600);
-    return () => window.clearTimeout(timeoutId);
+    const timeoutId = setTimeout(warmUp, 600);
+    return () => clearTimeout(timeoutId);
   }, [state.ui.showKnowledge]);
 
   // Auto-save state whenever significant changes occur
@@ -142,17 +143,19 @@ function App() {
         state.currentGoal, 
         state.knowledgeBase,
         getTerrainHeight,
-        state.activePlan
+        state.activePlan,
+        userApiKey
       );
       
       const apiLatency = Date.now() - apiStartTime;
       setState(prev => ({
         ...prev,
-        apiMetrics: [...prev.apiMetrics, { id: Math.random().toString(), timestamp: Date.now(), latency: apiLatency, status: 'success' }].slice(-20)
+        apiMetrics: [...prev.apiMetrics, { id: Math.random().toString(), timestamp: Date.now(), latency: apiLatency, status: 'success' as const }].slice(-20)
       }));
 
       setTaskProgress(40);
       addLog("Neural Uplink Successful. Processing synthesis packets...", "success");
+      setCurrentTask(decision.taskLabel);
       
       // Stream AI reasoning steps line by line
       if (decision.reasoningSteps && decision.reasoningSteps.length > 0) {
@@ -287,7 +290,7 @@ function App() {
       setState(prev => ({ 
         ...prev, 
         networkStatus: 'error',
-        apiMetrics: [...prev.apiMetrics, { id: Math.random().toString(), timestamp: Date.now(), latency: Date.now() - apiStartTime, status: 'error' }].slice(-20) 
+        apiMetrics: [...prev.apiMetrics, { id: Math.random().toString(), timestamp: Date.now(), latency: Date.now() - apiStartTime, status: 'error' as const }].slice(-20)
       }));
     } finally {
       setIsProcessing(false);
@@ -510,7 +513,10 @@ function App() {
         <button onClick={runSimulationStep} disabled={isProcessing} className="px-12 h-16 bg-white hover:bg-sky-50 text-slate-950 rounded-[20px] font-black uppercase italic tracking-tighter transition-all shadow-2xl disabled:opacity-50 active:scale-95">Initiate Synthesis</button>
       </div>
 
-      <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_center,_transparent_50%,_rgba(2,6,23,0.9)_100%)] opacity-80" />
+      <div
+        className="absolute inset-0 pointer-events-none opacity-80"
+        style={{ background: 'radial-gradient(circle at center, transparent 50%, rgba(2,6,23,0.9) 100%)' }}
+      />
     </div>
   );
 }

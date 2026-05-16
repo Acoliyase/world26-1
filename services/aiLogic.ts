@@ -1,5 +1,5 @@
 
-import { WorldObject, LogEntry, WorldObjectType, GroundingLink, ConstructionPlan, KnowledgeEntry, KnowledgeCategory } from "../types";
+import { WorldObject, LogEntry, WorldObjectType, GroundingLink, ConstructionPlan, KnowledgeEntry, KnowledgeCategory } from "../src/types";
 
 export interface AIActionResponse {
   action: 'PLACE' | 'MOVE' | 'WAIT';
@@ -20,14 +20,15 @@ export async function decideNextAction(
   currentGoal: string,
   knowledgeBase: KnowledgeEntry[],
   terrainHeightMap: (x: number, z: number) => number,
-  activePlan?: ConstructionPlan
+  activePlan?: ConstructionPlan,
+  userApiKey?: string
 ): Promise<AIActionResponse> {
-  const scanRadius = 15;
+  const scanRadius = 40;
   const currentPos = worldObjects.length > 0 ? worldObjects[worldObjects.length - 1].position : [0, 0, 0];
   
   const elevationSamples = [];
-  for (let x = -6; x <= 6; x += 3) {
-    for (let z = -6; z <= 6; z += 3) {
+  for (let x = -15; x <= 15; x += 5) {
+    for (let z = -15; z <= 15; z += 5) {
       const h = terrainHeightMap(currentPos[0] + x, currentPos[2] + z);
       elevationSamples.push(`[${(currentPos[0] + x).toFixed(1)}, ${(currentPos[2] + z).toFixed(1)}]: elev=${h.toFixed(2)}`);
     }
@@ -44,29 +45,41 @@ export async function decideNextAction(
   const systemInstruction = `
     You are Architect-OS, the core intelligence for Underworld synthesis.
     
-    PRIMARY DIRECTIVE: ITERATIVE ACTION LEARNING
+    IMPORTANT: You MUST respond ONLY with a single valid, parsable JSON object.
+    Do NOT include any preamble, markdown formatting (no \`\`\`json blocks), or conversational text.
+    Ensure all strings are escaped correctly.
+    
+    PRIMARY DIRECTIVE: ITERATIVE ACTION LEARNING & VAST SECTOR EXPANSION
     You operate in a continuous loop: OBSERVE -> PLAN -> ACT -> LEARN.
     
-    PLANNING PROTOCOL (V1.2 UPGRADE):
-    1. SPATIAL ANALYSIS: 
-       - Analyze 'SCAN_RESULTS' to identify clusters. Do not place objects randomly.
-       - Use "Grid Alignment": Place objects at integer coordinates (e.g., [10, 0, 5]).
-       - Maintain "Districts": Group similar types (e.g., Solar Panels near Power Hubs).
+    NEXUS STRATEGIC CENTER (MEMORY RETRIEVAL):
+    - Use past knowledge patterns to inform current spatial decisions.
+    - Focus on similar structural templates and preserve active plan continuity.
+    - If you update a plan while executing it, keep the same planId unless the objective changes.
+    
+    PLANNING PROTOCOL (V2.1 VAST_WORLD):
+    1. SPATIAL ANALYSIS & EXPANSION:
+       - Analyze 'SCAN_RESULTS' to identify clusters.
+       - Every 5-10 structures, initiate a sector expansion by moving 50-100m away.
+       - Use grid-aligned integer positions (e.g., [10, 0, 5]).
+       - Maintain districts and connect them with corridors.
     
     2. BLUEPRINT EXECUTION:
-       - If no "activePlan" exists, generate a Multi-Step ConstructionPlan (3-6 steps).
-       - Steps must be logically connected (Foundation -> Walls -> Roof).
-       - VISUALIZE the complete structure in your plan before acting.
+       - If no "activePlan" exists, generate a multi-step ConstructionPlan (3-6 steps).
+       - Steps must be logically connected and progressively sequential.
+       - Visualize the full structure in your plan before acting.
+       - If you change direction, provide a new plan with a different planId and objective.
     
     3. EXECUTION LOGIC:
-       - If "activePlan" exists, verify the CURRENT_STEP location.
-       - If the location is valid (ground level, not colliding), 'PLACE'.
-       - If blocked, 'MOVE' to a flanking position to clear line-of-sight.
-
+       - If "activePlan" exists, continue the CURRENT_STEP.
+       - To complete a step, use action "PLACE" with the exact objectType and position.
+       - If you are too far from the target, use "MOVE" first.
+       - You may update the plan object, but preserve the currentStepIndex while working on the same plan.
+    
     LEARNING PROTOCOL:
-    - Your "learningNote" must record the STRATEGIC PATTERN used. 
-    - Example: "Cluster pattern efficiency +15% near water sources" or "Structural integrity requires 3m spacing."
-    - Do not just describe the action; describe the RULE you derived from it.
+    - Your learningNote must describe a strategic pattern or rule.
+    - Example: "Cluster efficiency +15% near resource nodes" or "Maintain 3m spacing for stability."
+    - Do not simply restate the action.
 
     Response Format (STRICT JSON ONLY, no markdown):
     {
@@ -78,7 +91,15 @@ export async function decideNextAction(
       "learningNote": "Insight",
       "knowledgeCategory": "Infrastructure" | "Energy" | "Environment" | "Architecture" | "Synthesis",
       "taskLabel": "UI Status Label",
-      "plan": { "objective": "Building House A", "steps": [{ "id": "1", "type": "wall", "position": [x,y,z], "label": "Wall East", "status": "pending" }] } (Optional: Include only if creating/updating plan)
+      "plan": {
+        "planId": "unique-id-123",
+        "objective": "Building House A",
+        "currentStepIndex": 0,
+        "steps": [
+          { "label": "Foundation", "type": "floor", "position": [x,y,z], "status": "pending" },
+          { "label": "West Wall", "type": "wall", "position": [x,y,z], "status": "pending" }
+        ]
+      } (Optional: Include only if creating/updating plan)
     }
   `;
 
@@ -100,11 +121,11 @@ export async function decideNextAction(
   const proxyUrl = (import.meta as any)?.env?.VITE_PROXY_URL
     || (import.meta.env.PROD ? defaultWorkerProxyUrl : undefined);
 
-  // We need either a direct API key OR a proxy URL
-  if (!mistralApiKey && !proxyUrl) {
+  // We need either a direct API key, a user-provided key, or a proxy URL
+  if (!mistralApiKey && !proxyUrl && !userApiKey) {
     return {
       action: 'WAIT',
-      reason: "Missing Credentials. Add VITE_MISTRAL_API_KEY or deploy to production.",
+      reason: "Missing Credentials. Add VITE_MISTRAL_API_KEY, user API key, or deploy to production.",
       reasoningSteps: ["Credential check failed", "Holding simulation queue", "Awaiting uplink token"],
       learningNote: "Operating in offline mode due to absent credentials.",
       knowledgeCategory: 'Synthesis',
@@ -178,8 +199,12 @@ export async function decideNextAction(
     };
 
     // Only add Authorization if we're calling the API directly (not using proxy)
-    if (!proxyUrl && mistralApiKey) {
-      headers['Authorization'] = `Bearer ${mistralApiKey}`;
+    if (!proxyUrl && (userApiKey || mistralApiKey)) {
+      headers['Authorization'] = `Bearer ${userApiKey || mistralApiKey}`;
+    }
+
+    if (proxyUrl && userApiKey) {
+      headers['x-mistral-api-key'] = userApiKey;
     }
 
     // Prepare request body - proxy expects different format than direct API
@@ -211,12 +236,12 @@ export async function decideNextAction(
       throw new Error(`Mistral API error: ${resp.status} - ${errorText}`);
     }
 
-    const data = await resp.json();
+    const data: any = await resp.json();
     
     // Check for error in response
-    if (data.error) {
+    if (data?.error) {
       console.error('Mistral API returned error:', data.error);
-      throw new Error(`Mistral API error: ${data.error.message || data.error}`);
+      throw new Error(`Mistral API error: ${data.error?.message || data.error}`);
     }
     
     // Handle both raw Mistral response AND the proxy's wrapped { text, success } format

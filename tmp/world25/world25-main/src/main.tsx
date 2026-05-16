@@ -2,6 +2,7 @@
 /// <reference types="vite/client" />
 import React from 'react';
 import * as ReactDOM from 'react-dom/client';
+import './index.css';
 import App from './App';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 
@@ -16,15 +17,16 @@ window.addEventListener('unhandledrejection', (event) => {
   console.error('❌ Unhandled promise rejection:', message, reason);
 });
 
+// Handle module loading failures
 window.addEventListener('importmap:error', (event) => {
   console.error('❌ Module import failed:', event);
 });
 
+// Catch network errors for failed module loads
 console.log('🚀 Application starting...');
 console.log('Environment:', import.meta.env.MODE);
 console.log('Base URL:', import.meta.env.BASE_URL);
 console.log('Proxy URL:', import.meta.env.VITE_PROXY_URL);
-(window as Window & { __WORLD26_APP_MOUNTED__?: boolean }).__WORLD26_APP_MOUNTED__ = false;
 
 try {
   const rootElement = document.getElementById('root');
@@ -44,7 +46,6 @@ try {
     </React.StrictMode>
   );
 
-  (window as Window & { __WORLD26_APP_MOUNTED__?: boolean }).__WORLD26_APP_MOUNTED__ = true;
   console.log('✅ React app mounted');
 } catch (error) {
   console.error('❌ Fatal error during app initialization:', error);
