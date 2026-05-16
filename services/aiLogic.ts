@@ -96,8 +96,9 @@ export async function decideNextAction(
     ?? (typeof process !== 'undefined' ? (process.env as any)?.MISTRAL_API_KEY : '')
     ?? '').toString().trim();
 
-  // Use Cloudflare Worker proxy in production, or direct API in development
-  const proxyUrl = (import.meta as any)?.env?.VITE_PROXY_URL;
+  const defaultWorkerProxyUrl = 'https://mistralapicaller.yusufsamodien12.workers.dev/v1/chat/completions';
+  const proxyUrl = (import.meta as any)?.env?.VITE_PROXY_URL
+    || (import.meta.env.PROD ? defaultWorkerProxyUrl : undefined);
 
   // We need either a direct API key OR a proxy URL
   if (!mistralApiKey && !proxyUrl) {

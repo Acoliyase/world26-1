@@ -7,7 +7,7 @@ export default defineConfig(({ mode }) => {
     const isProd = mode === 'production';
 
     return {
-      base: isProd ? '/world26/' : '/',
+      base: '/',
       build: {
         rollupOptions: {
           input: {
@@ -17,16 +17,11 @@ export default defineConfig(({ mode }) => {
       },
       envPrefix: 'VITE_',
       define: {
-        'import.meta.env.VITE_PROXY_URL': JSON.stringify(
-          isProd 
-            ? 'https://ai-proxy-cloudflare-worker.yusufsamodin67.workers.dev'
-            : undefined
-        ),
-        'import.meta.env.VITE_PROXY_TOKEN': JSON.stringify(
-          isProd 
-            ? 'public-access-token-2026'
-            : undefined
-        )
+        'import.meta.env.VITE_PROXY_URL': env.VITE_PROXY_URL
+          ? JSON.stringify(env.VITE_PROXY_URL)
+          : isProd
+            ? JSON.stringify('https://mistralapicaller.yusufsamodien12.workers.dev/v1/chat/completions')
+            : 'undefined'
       },
       server: {
         port: 4000,

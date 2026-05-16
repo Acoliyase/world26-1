@@ -3,8 +3,10 @@ import { logger } from './logger';
 
 // Use worker's state endpoint in production, local API in development
 const getStateEndpoint = () => {
-  // Use the defined environment variable directly for Vite compatibility
-  const proxyUrl = import.meta.env.VITE_PROXY_URL || (import.meta as any)?.env?.VITE_PROXY_URL;
+  const defaultWorkerProxyUrl = 'https://mistralapicaller.yusufsamodien12.workers.dev/v1/chat/completions';
+  const proxyUrl = import.meta.env.VITE_PROXY_URL
+    || (import.meta as any)?.env?.VITE_PROXY_URL
+    || (import.meta.env.PROD ? defaultWorkerProxyUrl : undefined);
   
   // New proxy doesn't support state endpoint - use localStorage instead
   if (proxyUrl && proxyUrl.includes('ai-proxy-cloudflare-worker')) {
@@ -12,7 +14,6 @@ const getStateEndpoint = () => {
   }
   
   if (proxyUrl && proxyUrl.includes('workers.dev')) {
-    // Old proxy with state support
     const baseUrl = proxyUrl.split('/v1/')[0];
     return `${baseUrl}/state`;
   }

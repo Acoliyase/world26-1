@@ -158,15 +158,29 @@ function App() {
       if (decision.reasoningSteps && decision.reasoningSteps.length > 0) {
         for (const step of decision.reasoningSteps) {
           addLog(`[REASONING]: ${step}`, 'thinking');
-          await new Promise(r => setTimeout(r, 600)); // Simulate thinking per line
+          await new Promise(r => setTimeout(r, 250));
         }
       }
 
       setCurrentTask(decision.taskLabel);
       setTaskProgress(70);
 
+      const normalizePlan = (plan?: ConstructionPlan | undefined): ConstructionPlan | undefined => {
+        if (!plan) return undefined;
+        return {
+          ...plan,
+          steps: plan.steps.map((step, index) => ({
+            ...step,
+            status: step.status || (index === plan.currentStepIndex ? 'active' : 'pending')
+          }))
+        };
+      };
+
+      const planFromDecision = normalizePlan(decision.plan);
+      const existingPlan = normalizePlan(state.activePlan);
+      const nextPlan = planFromDecision || existingPlan;
+
       if (decision.action === 'PLACE') {
-        let nextPlan = decision.plan || state.activePlan;
         const targetType = decision.objectType || (nextPlan ? nextPlan.steps[nextPlan.currentStepIndex].type : 'modular_unit');
         let targetPos = decision.position || (nextPlan ? nextPlan.steps[nextPlan.currentStepIndex].position : [0,0,0]);
 
@@ -175,7 +189,7 @@ function App() {
         addLog(`Synthesis Confirmed: Deploying ${targetType} unit.`, 'success');
         setAvatarPos(targetPos as [number, number, number]);
         
-        await new Promise(r => setTimeout(r, 800));
+        await new Promise(r => setTimeout(r, 300));
         setTaskProgress(100);
 
         const newObj: WorldObject = {
@@ -188,35 +202,30 @@ function App() {
         };
 
         setState(prev => {
-          let updatedPlan = decision.plan || prev.activePlan;
-          if (updatedPlan && updatedPlan.steps && updatedPlan.steps[updatedPlan.currentStepIndex]) {
+          let updatedPlan = planFromDecision || normalizePlan(prev.activePlan);
+          if (updatedPlan && updatedPlan.steps && typeof updatedPlan.currentStepIndex === 'number' && updatedPlan.steps[updatedPlan.currentStepIndex]) {
             const steps = [...updatedPlan.steps];
-            steps[updatedPlan.currentStepIndex].status = 'completed';
-            
-            // If the AI provided a new plan AND executed a PLACE action, we should normally advance the step.
-            // However, to be safe, we only advance if we didn't just receive this plan (unless we want to assume the first step was just done).
-            // Logic: PLACE implies we did work. So we should increment. 
-            // Previous logic: + (decision.plan ? 0 : 1). This kept it at 0 if new plan. 
-            // If we keep it at 0, we mark it completed then immediately active again.
-            // Let's assume if it is a NEW plan, we treat the PLACE as the completion of the current step (index 0 usually).
-            
-            const nextIdx = updatedPlan.currentStepIndex + 1; 
-            
+            steps[updatedPlan.currentStepIndex] = {
+              ...steps[updatedPlan.currentStepIndex],
+              status: 'completed'
+            };
+            const nextIdx = updatedPlan.currentStepIndex + 1;
             if (nextIdx < steps.length) {
-              steps[nextIdx].status = 'active';
+              steps[nextIdx] = {
+                ...steps[nextIdx],
+                status: 'active'
+              };
               updatedPlan = { ...updatedPlan, steps, currentStepIndex: nextIdx };
             } else {
               updatedPlan = undefined;
               addLog("Strategic Objective Achieved.", "success");
             }
           } else if (updatedPlan && (!updatedPlan.steps || !updatedPlan.steps[updatedPlan.currentStepIndex])) {
-             // Fallback if plan is malformed or finished
-             updatedPlan = undefined;
+            updatedPlan = undefined;
           }
 
           const newKnowledge = [...prev.knowledgeBase];
           const titleCandidate = decision.learningNote?.split(':')[0]?.trim() || "Synthesis Logic";
-          
           if (!newKnowledge.find(k => k.title === titleCandidate)) {
             newKnowledge.push({
               id: Math.random().toString(),
@@ -246,8 +255,15 @@ function App() {
       } else if (decision.action === 'MOVE' && decision.position) {
         setAvatarPos([decision.position[0], getTerrainHeight(decision.position[0], decision.position[2]), decision.position[2]]);
         addLog(`Relocating: Optimizing sector positioning.`, 'action');
+        if (planFromDecision) {
+          setState(prev => ({ ...prev, activePlan: planFromDecision }));
+        }
       } else {
         addLog(`Simulation standby: ${decision.reason}`, 'action');
+        if (planFromDecision) {
+          setState(prev => ({ ...prev, activePlan: planFromDecision }));
+          addLog("Blueprint persisted to active plan and awaits execution.", "success");
+        }
       }
     } catch (e) {
       addLog("Critical neural desync. Link unstable.", "error");
@@ -269,7 +285,7 @@ function App() {
 
   useEffect(() => {
     if (isAuto && !isProcessing) {
-      const t = setTimeout(runSimulationStep, 4500);
+      const t = setTimeout(runSimulationStep, 2200);
       return () => clearTimeout(t);
     }
   }, [isAuto, isProcessing, runSimulationStep]);
