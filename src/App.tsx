@@ -162,16 +162,18 @@ function App() {
         }
       }
 
-      setCurrentTask(decision.taskLabel);
       setTaskProgress(70);
 
       const normalizePlan = (plan?: ConstructionPlan | undefined): ConstructionPlan | undefined => {
         if (!plan) return undefined;
+        const safeIndex = typeof plan.currentStepIndex === 'number' && plan.currentStepIndex >= 0 && plan.currentStepIndex < plan.steps.length ? plan.currentStepIndex : 0;
         return {
           ...plan,
+          currentStepIndex: safeIndex,
           steps: plan.steps.map((step, index) => ({
             ...step,
-            status: step.status || (index === plan.currentStepIndex ? 'active' : 'pending')
+            status: step.status || (index === safeIndex ? 'active' : 'pending'),
+            position: step.position || [0, 0, 0]
           }))
         };
       };
@@ -180,9 +182,24 @@ function App() {
       const existingPlan = normalizePlan(state.activePlan);
       const nextPlan = planFromDecision || existingPlan;
 
-      if (decision.action === 'PLACE') {
-        const targetType = decision.objectType || (nextPlan ? nextPlan.steps[nextPlan.currentStepIndex].type : 'modular_unit');
-        let targetPos = decision.position || (nextPlan ? nextPlan.steps[nextPlan.currentStepIndex].position : [0,0,0]);
+      const effectiveDecision = (() => {
+        if (decision.action === 'WAIT' && planFromDecision && !state.activePlan && planFromDecision.steps.length > 0) {
+          addLog('Blueprint completed. Executing first step immediately.', 'success');
+          return {
+            ...decision,
+            action: 'PLACE' as const,
+            objectType: planFromDecision.steps[0].type,
+            position: planFromDecision.steps[0].position
+          };
+        }
+        return decision;
+      })();
+
+      setCurrentTask(effectiveDecision.taskLabel || decision.taskLabel);
+
+      if (effectiveDecision.action === 'PLACE') {
+        const targetType = effectiveDecision.objectType || (nextPlan ? nextPlan.steps[nextPlan.currentStepIndex].type : 'modular_unit');
+        let targetPos = effectiveDecision.position || (nextPlan ? nextPlan.steps[nextPlan.currentStepIndex].position : [0,0,0]);
 
         targetPos = [targetPos[0], getTerrainHeight(targetPos[0], targetPos[2]), targetPos[2]];
 
@@ -224,17 +241,17 @@ function App() {
             updatedPlan = undefined;
           }
 
-          const newKnowledge = [...prev.knowledgeBase];
-          const titleCandidate = decision.learningNote?.split(':')[0]?.trim() || "Synthesis Logic";
+            const newKnowledge = [...prev.knowledgeBase];
+          const titleCandidate = effectiveDecision.learningNote?.split(':')[0]?.trim() || "Synthesis Logic";
           if (!newKnowledge.find(k => k.title === titleCandidate)) {
             newKnowledge.push({
               id: Math.random().toString(),
               title: titleCandidate,
-              description: decision.learningNote,
-              category: decision.knowledgeCategory,
+              description: effectiveDecision.learningNote,
+              category: effectiveDecision.knowledgeCategory,
               iteration: prev.learningIteration,
               timestamp: Date.now(),
-              links: decision.groundingLinks
+              links: effectiveDecision.groundingLinks
             });
           }
 
@@ -252,14 +269,14 @@ function App() {
             }
           };
         });
-      } else if (decision.action === 'MOVE' && decision.position) {
-        setAvatarPos([decision.position[0], getTerrainHeight(decision.position[0], decision.position[2]), decision.position[2]]);
+      } else if (effectiveDecision.action === 'MOVE' && effectiveDecision.position) {
+        setAvatarPos([effectiveDecision.position[0], getTerrainHeight(effectiveDecision.position[0], effectiveDecision.position[2]), effectiveDecision.position[2]]);
         addLog(`Relocating: Optimizing sector positioning.`, 'action');
         if (planFromDecision) {
           setState(prev => ({ ...prev, activePlan: planFromDecision }));
         }
       } else {
-        addLog(`Simulation standby: ${decision.reason}`, 'action');
+        addLog(`Simulation standby: ${effectiveDecision.reason}`, 'action');
         if (planFromDecision) {
           setState(prev => ({ ...prev, activePlan: planFromDecision }));
           addLog("Blueprint persisted to active plan and awaits execution.", "success");

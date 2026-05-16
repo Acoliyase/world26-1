@@ -87,7 +87,7 @@ export async function decideNextAction(
     TERRAIN_ELEVATION: ${elevationSamples.join(', ')}
     NEARBY_STRUCTURES: ${proximityAnalysis || 'Sector Empty - Prime for Colonization'}
     KNOWLEDGE_NODES: ${knowledgeBase.length}
-    CURRENT_PLAN: ${activePlan ? `Step ${activePlan.currentStepIndex + 1}/${activePlan.steps.length}: ${activePlan.steps[activePlan.currentStepIndex].label} at [${activePlan.steps[activePlan.currentStepIndex].position.join(',')}]` : 'NONE - Awaiting Strategic Blueprint'}
+    CURRENT_PLAN: ${activePlan ? `Step ${activePlan.currentStepIndex + 1}/${activePlan.steps.length}: ${activePlan.steps[activePlan.currentStepIndex]?.label || 'unknown'} at [${activePlan.steps[activePlan.currentStepIndex]?.position?.join(',') || 'unknown'}]` : 'NONE - Awaiting Strategic Blueprint'}
 
     synthesize_next_move();
   `;
@@ -112,6 +112,63 @@ export async function decideNextAction(
       groundingLinks: []
     };
   }
+
+  const extractJson = (text: string): string | null => {
+    const trimmed = text.trim();
+    try {
+      JSON.parse(trimmed);
+      return trimmed;
+    } catch {
+      const match = trimmed.match(/\{[\s\S]*\}/);
+      return match ? match[0] : null;
+    }
+  };
+
+  const ensurePlan = (plan?: any): ConstructionPlan | undefined => {
+    if (!plan || !Array.isArray(plan.steps) || plan.steps.length === 0) return undefined;
+
+    const safeSteps = plan.steps.map((step: any, index: number) => ({
+      label: typeof step?.label === 'string' ? step.label : `Step ${index + 1}`,
+      type: typeof step?.type === 'string' ? step.type : 'modular_unit',
+      position: Array.isArray(step?.position) && step.position.length === 3 ? [Math.round(step.position[0]), 0, Math.round(step.position[2])] as [number, number, number] : [Math.round(currentPos[0] + index * 2), 0, Math.round(currentPos[2] + index * 2)] as [number, number, number],
+      status: step?.status === 'completed' ? 'completed' : index === (typeof plan.currentStepIndex === 'number' ? plan.currentStepIndex : 0) ? 'active' : 'pending'
+    }));
+
+    const currentStepIndex = typeof plan.currentStepIndex === 'number' && plan.currentStepIndex >= 0 && plan.currentStepIndex < safeSteps.length ? plan.currentStepIndex : 0;
+
+    return {
+      objective: typeof plan?.objective === 'string' ? plan.objective : 'Strategic Deployment',
+      planId: typeof plan?.planId === 'string' ? plan.planId : `plan-${Date.now()}`,
+      currentStepIndex,
+      steps: safeSteps
+    } as ConstructionPlan;
+  };
+
+  const createFallbackDecision = (): AIActionResponse => {
+    const fallbackPlan: ConstructionPlan = {
+      planId: `fallback-${Date.now()}`,
+      objective: 'Fallback Modular Blueprint',
+      currentStepIndex: 0,
+      steps: [
+        { label: 'Deploy Core Module', type: 'modular_unit', position: [Math.round(currentPos[0] + 2), 0, Math.round(currentPos[2] + 2)], status: 'active' },
+        { label: 'Deploy Solar Array', type: 'solar_panel', position: [Math.round(currentPos[0] + 5), 0, Math.round(currentPos[2] + 2)], status: 'pending' },
+        { label: 'Erect Support Wall', type: 'wall', position: [Math.round(currentPos[0] + 2), 0, Math.round(currentPos[2] + 5)], status: 'pending' }
+      ]
+    };
+
+    return {
+      action: 'PLACE',
+      objectType: fallbackPlan.steps[0].type,
+      position: fallbackPlan.steps[0].position,
+      reason: 'Fallback blueprint generated to maintain continuous synthesis.',
+      reasoningSteps: ['Unable to parse remote response', 'Generating local strategic fallback', 'Executing first construction step'],
+      learningNote: 'Fallback planning ensures forward progress when external judgement is unavailable.',
+      knowledgeCategory: 'Architecture',
+      taskLabel: 'Fallback Blueprint Active',
+      plan: fallbackPlan,
+      groundingLinks: []
+    };
+  };
 
   try {
     // Use proxy URL if available, otherwise fall back to direct API
@@ -178,10 +235,29 @@ export async function decideNextAction(
       responseText = responseText.replace(/```[a-z]*\n?/gi, '').replace(/```/g, '').trim();
     }
 
-    const parsed = JSON.parse(responseText);
-    const links: GroundingLink[] = [];
+    const jsonText = extractJson(responseText);
+    if (!jsonText) {
+      console.warn('Unable to extract JSON from AI response, falling back.');
+      return createFallbackDecision();
+    }
 
-    return { ...parsed, groundingLinks: links } as AIActionResponse;
+    const parsed = JSON.parse(jsonText);
+    const links: GroundingLink[] = [];
+    const validated: AIActionResponse = {
+      ...parsed,
+      groundingLinks: links
+    } as AIActionResponse;
+
+    if (validated.plan) {
+      validated.plan = ensurePlan(validated.plan) as ConstructionPlan;
+    }
+
+    if (!validated.action || !['PLACE', 'MOVE', 'WAIT'].includes(validated.action)) {
+      console.warn('AI action invalid, applying fallback plan.');
+      return createFallbackDecision();
+    }
+
+    return validated;
   } catch (error) {
     console.error("Architect-OS Neural Fault:", error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -191,7 +267,8 @@ export async function decideNextAction(
       reasoningSteps: ["Connection failure detected", "Re-routing synthesis request", "Flushing instruction cache"],
       learningNote: "Logic gate misalignment detected during planning phase.",
       knowledgeCategory: 'Synthesis',
-      taskLabel: "Recalibrating..."
+      taskLabel: "Recalibrating...",
+      groundingLinks: []
     };
   }
 }
