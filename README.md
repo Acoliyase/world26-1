@@ -45,6 +45,31 @@ npm run dev
 
 Open http://localhost:5173 🎉
 
+## ☁️ Cloudflare Worker Deployment
+
+This repo includes the Cloudflare Worker proxy in `temp_mistralapicaller`.
+
+From the repo root:
+
+```bash
+export CLOUDFLARE_API_TOKEN='...'
+npm run worker:install
+npx wrangler whoami
+npm run worker:setup
+```
+
+After deployment, update `.env.local` with your worker URL:
+
+```bash
+VITE_PROXY_URL=https://YOUR_WORKER.workers.dev/v1/chat/completions
+```
+
+If you already have secrets and D1 configured, deploy directly with:
+
+```bash
+npm run worker:deploy
+```
+
 ## Deploy to GitHub Pages
 
 ### 🔒 Option 1: Secure Cloudflare Worker Proxy (Recommended)
